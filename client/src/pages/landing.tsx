@@ -15,11 +15,11 @@ export default function Landing() {
             <h1 className="text-xl font-bold">EuroAssist.ai</h1>
           </div>
           <Button
-            onClick={() => window.location.href = "/api/login"}
+            onClick={() => window.location.href = "/signup"}
             className="bg-primary hover:bg-primary/90"
-            data-testid="button-login"
+            data-testid="button-signup"
           >
-            Sign In
+            Sign Up
           </Button>
         </div>
       </header>
@@ -40,7 +40,7 @@ export default function Landing() {
           </p>
           <Button
             size="lg"
-            onClick={() => window.location.href = "/api/login"}
+            onClick={() => window.location.href = "/api/signup"}
             className="bg-primary hover:bg-primary/90 text-lg px-8 py-6"
             data-testid="button-get-started"
           >
@@ -140,7 +140,7 @@ export default function Landing() {
           </p>
           <Button
             size="lg"
-            onClick={() => window.location.href = "/api/login"}
+            onClick={() => window.location.href = "/api/signup"}
             className="bg-primary hover:bg-primary/90"
             data-testid="button-start-exploring"
           >

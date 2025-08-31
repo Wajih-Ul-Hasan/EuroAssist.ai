@@ -59,16 +59,16 @@ export default function Home() {
   }, [user, authLoading, toast]);
 
   // Fetch user chats
-  const { data: chats = [], isLoading: chatsLoading } = useQuery<Chat[]>({
+  const { data: chats = [], isPending: chatsLoading } = useQuery<Chat[]>({
     queryKey: ["/api/chats"],
     enabled: !!user,
   });
 
   // Fetch current chat messages
-  const { data: currentChatData, isLoading: messagesLoading } = useQuery({
+  const { data: currentChatData, isPending: messagesLoading } = useQuery({
     queryKey: ["/api/chats", currentChatId],
     enabled: !!currentChatId,
-  }) as { data: ChatWithMessages | undefined; isLoading: boolean };
+  }) as { data: ChatWithMessages | undefined; isPending: boolean };
 
   // Create new chat mutation
   const createChatMutation = useMutation({
@@ -179,15 +179,26 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [currentChatData?.messages]);
 
-  const handleNewChat = () => {
-    createChatMutation.mutate("New Chat");
+  const handleNewChat = async () => {
+    try {
+      const newChat = await createChatMutation.mutateAsync("New Chat");
+      if (newChat?.id) {
+        setCurrentChatId(newChat.id);
+      }
+    } catch (err) {
+      // error handled by onError
+    }
   };
 
   const handleSendMessage = async () => {
     if (!message.trim() || !currentChatId || sendMessageMutation.isPending) return;
     
     setIsTyping(true);
-    sendMessageMutation.mutate({ chatId: currentChatId, content: message.trim() });
+    try {
+      await sendMessageMutation.mutateAsync({ chatId: currentChatId, content: message.trim() });
+    } catch (err) {
+      // error handled by onError
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -224,14 +235,19 @@ export default function Home() {
     }
   ];
 
-  const handleSuggestedQuestion = (question: string) => {
+  const handleSuggestedQuestion = async (question: string) => {
     if (!currentChatId) {
-      // Create new chat first
-      createChatMutation.mutate("New Chat");
-      // The message will need to be sent after chat creation
-      setTimeout(() => {
+      try {
+        const newChat = await createChatMutation.mutateAsync("New Chat");
+        if (newChat?.id) {
+          setCurrentChatId(newChat.id);
+          setMessage(question);
+        } else {
+          setMessage(question);
+        }
+      } catch (err) {
         setMessage(question);
-      }, 100);
+      }
     } else {
       setMessage(question);
     }

@@ -10,22 +10,24 @@ import {
   type InsertMessage,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 
 // Interface for storage operations
 export interface IStorage {
   // User operations
-  // (IMPORTANT) these user operations are mandatory for Replit Auth.
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
-  
+  // New helper methods for email/password flows
+  getUserByEmail(email: string): Promise<User | undefined>;
+  createUser(user: UpsertUser): Promise<User>;
+
   // Chat operations
   getUserChats(userId: string): Promise<Chat[]>;
   getChat(chatId: string, userId: string): Promise<Chat | undefined>;
   createChat(chat: InsertChat): Promise<Chat>;
   updateChatTitle(chatId: string, title: string, userId: string): Promise<void>;
   deleteChat(chatId: string, userId: string): Promise<void>;
-  
+
   // Message operations
   getChatMessages(chatId: string): Promise<Message[]>;
   createMessage(message: InsertMessage): Promise<Message>;
@@ -33,8 +35,6 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   // User operations
-  // (IMPORTANT) these user operations are mandatory for Replit Auth.
-
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
@@ -55,6 +55,17 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  // createUser: create new user (will fail if email uniqueness violated)
+  async createUser(userData: UpsertUser): Promise<User> {
+    const [user] = await db.insert(users).values(userData).returning();
+    return user;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+
   // Chat operations
   async getUserChats(userId: string): Promise<Chat[]> {
     return await db
@@ -68,29 +79,31 @@ export class DatabaseStorage implements IStorage {
     const [chat] = await db
       .select()
       .from(chats)
-      .where(eq(chats.id, chatId) && eq(chats.userId, userId));
+      // Use AND correctly by passing multiple where clauses
+      .where(and(eq(chats.id, chatId), eq(chats.userId, userId)));
     return chat;
   }
 
   async createChat(chat: InsertChat): Promise<Chat> {
-    const [newChat] = await db
-      .insert(chats)
-      .values(chat)
-      .returning();
+    const [newChat] = await db.insert(chats).values(chat).returning();
     return newChat;
   }
 
-  async updateChatTitle(chatId: string, title: string, userId: string): Promise<void> {
+  async updateChatTitle(
+    chatId: string,
+    title: string,
+    userId: string
+  ): Promise<void> {
     await db
       .update(chats)
       .set({ title, updatedAt: new Date() })
-      .where(eq(chats.id, chatId) && eq(chats.userId, userId));
+      .where(and(eq(chats.id, chatId), eq(chats.userId, userId)));
   }
 
   async deleteChat(chatId: string, userId: string): Promise<void> {
     await db
       .delete(chats)
-      .where(eq(chats.id, chatId) && eq(chats.userId, userId));
+      .where(and(eq(chats.id, chatId), eq(chats.userId, userId)));
   }
 
   // Message operations
@@ -103,10 +116,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createMessage(message: InsertMessage): Promise<Message> {
-    const [newMessage] = await db
-      .insert(messages)
-      .values(message)
-      .returning();
+    const [newMessage] = await db.insert(messages).values(message).returning();
     return newMessage;
   }
 }
