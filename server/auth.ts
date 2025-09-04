@@ -4,7 +4,7 @@ import session from "express-session";
 import cors from "cors";
 import { storage } from "./storage";
 
-// ✅ Extend Express.Request
+
 declare global {
   namespace Express {
     interface UserClaims {

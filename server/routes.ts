@@ -9,22 +9,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
 
-  // Auth routes
-  app.get("/api/auth/user", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const user = await storage.getUser(userId);
-      res.json(user);
-    } catch (error) {
-      console.error("Error fetching user:", error);
-      res.status(500).json({ message: "Failed to fetch user" });
-    }
-  });
-
+  // --------------------
   // Chat routes
+  // --------------------
   app.get("/api/chats", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.id;
+      const userId = req.session.user.id; // ✅ fixed
       const chats = await storage.getUserChats(userId);
       res.json(chats);
     } catch (error) {
@@ -35,7 +25,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/chats/:chatId", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.id;
+      const userId = req.session.user.id; // ✅ fixed
       const { chatId } = req.params;
 
       const chat = await storage.getChat(chatId, userId);
@@ -51,12 +41,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create chat - validate only title from the request body (userId from session)
+  // Create chat
   app.post("/api/chats", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.id;
+      const userId = req.session.user.id; // ✅ fixed
 
-      // Validate only the request-provided fields (title)
       const bodySchema = z.object({
         title: z.string().min(1),
       });
@@ -77,7 +66,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/chats/:chatId", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.id;
+      const userId = req.session.user.id; // ✅ fixed
       const { chatId } = req.params;
 
       await storage.deleteChat(chatId, userId);
@@ -88,13 +77,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Message routes - validate only content and role in body; chatId comes from URL param
+  // Message routes
   app.post(
     "/api/chats/:chatId/messages",
     isAuthenticated,
     async (req: any, res) => {
       try {
-        const userId = req.user.id;
+        const userId = req.session.user.id; // ✅ fixed
         const { chatId } = req.params;
 
         const bodySchema = z.object({
@@ -103,20 +92,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         const { content, role } = bodySchema.parse(req.body);
 
-        // Verify chat belongs to user
         const chat = await storage.getChat(chatId, userId);
         if (!chat) {
           return res.status(404).json({ message: "Chat not found" });
         }
 
-        // Create user message
         const userMessage = await storage.createMessage({
           chatId,
           content,
           role: "user",
         });
 
-        // Generate AI response for user messages
         if (role === "user") {
           try {
             const aiResponse = await generateUniversityResponse(content);
@@ -126,10 +112,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               role: "assistant",
             });
 
-            // If this is the first message, update chat title
             const messages = await storage.getChatMessages(chatId);
             if (messages.length === 2) {
-              // user message + assistant response
               const title = await generateChatTitle(content);
               await storage.updateChatTitle(chatId, title, userId);
             }
@@ -137,7 +121,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             res.json({ userMessage, assistantMessage });
           } catch (aiError) {
             console.error("AI response error:", aiError);
-            // Return user message even if AI fails
             res.json({
               userMessage,
               error: "Failed to generate AI response. Please try again.",
