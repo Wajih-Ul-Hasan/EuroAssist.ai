@@ -3,44 +3,88 @@ import {
   chats,
   messages,
   type User,
+  type UpsertUser,
   type Chat,
   type Message,
   type InsertChat,
   type InsertMessage,
-  type UpsertUser,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and } from "drizzle-orm";
 
+// Interface for storage operations
 export interface IStorage {
+  // User operations
   getUser(id: string): Promise<User | undefined>;
+  upsertUser(user: UpsertUser): Promise<User>;
   getUserByEmail(email: string): Promise<User | undefined>;
-  createUser(user: UpsertUser): Promise<User>;
+  createUser(data: {
+    email: string;
+    passwordHash: string;
+    firstName: string;
+    lastName: string;
+  }): Promise<User>;
+
+  // Chat operations
   getUserChats(userId: string): Promise<Chat[]>;
   getChat(chatId: string, userId: string): Promise<Chat | undefined>;
   createChat(chat: InsertChat): Promise<Chat>;
   updateChatTitle(chatId: string, title: string, userId: string): Promise<void>;
   deleteChat(chatId: string, userId: string): Promise<void>;
+
+  // Message operations
   getChatMessages(chatId: string): Promise<Message[]>;
-  createMessage(message: InsertMessage): Promise<Message>;
+  createMessage(chatId: string, message: InsertMessage): Promise<Message>;
 }
 
 export class DatabaseStorage implements IStorage {
+  // User operations
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
   }
 
+  async upsertUser(userData: UpsertUser): Promise<User> {
+    const [user] = await db
+      .insert(users)
+      .values(userData)
+      .onConflictDoUpdate({
+        target: users.id,
+        set: {
+          ...userData,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return user;
+  }
+
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email));
     return user;
   }
 
-  async createUser(userData: UpsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(userData).returning();
+  async createUser(data: {
+    email: string;
+    passwordHash: string;
+    firstName: string;
+    lastName: string;
+  }): Promise<User> {
+    const [user] = await db
+      .insert(users)
+      .values({
+        ...data,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
     return user;
   }
 
+  // Chat operations
   async getUserChats(userId: string): Promise<Chat[]> {
     return await db
       .select()
@@ -65,7 +109,7 @@ export class DatabaseStorage implements IStorage {
   async updateChatTitle(
     chatId: string,
     title: string,
-    userId: string
+    userId: string,
   ): Promise<void> {
     await db
       .update(chats)
@@ -79,6 +123,7 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(chats.id, chatId), eq(chats.userId, userId)));
   }
 
+  // Message operations
   async getChatMessages(chatId: string): Promise<Message[]> {
     return await db
       .select()
@@ -87,8 +132,18 @@ export class DatabaseStorage implements IStorage {
       .orderBy(messages.createdAt);
   }
 
-  async createMessage(message: InsertMessage): Promise<Message> {
-    const [newMessage] = await db.insert(messages).values(message).returning();
+  async createMessage(
+    chatId: string,
+    message: InsertMessage,
+  ): Promise<Message> {
+    const [newMessage] = await db
+      .insert(messages)
+      .values({
+        chatId,
+        content: message.content,
+        role: message.role,
+      })
+      .returning();
     return newMessage;
   }
 }

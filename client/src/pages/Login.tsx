@@ -27,7 +27,7 @@ export default function Login() {
     if (!res.ok) throw new Error("Invalid credentials");
 
     // navigate to home
-    setLocation("/home");
+    setLocation("/");
   } catch (err: any) {
     toast({
       title: "Login failed",

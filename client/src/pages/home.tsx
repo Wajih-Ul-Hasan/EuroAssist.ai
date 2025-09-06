@@ -12,7 +12,6 @@ import {
   Plus,
   Send,
   Menu,
-  Settings,
   LogOut,
   Trash2,
   Euro,
@@ -39,60 +38,44 @@ export default function Home() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [sidebarOpen, setSidebarOpen] = useState(false); // Default to closed on mobile
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Handle responsive sidebar behavior
+  // Sidebar responsive behavior
   useEffect(() => {
     const handleResize = () => {
-      // Auto-open sidebar on desktop, close on mobile
-      if (window.innerWidth >= 1024) {
-        setSidebarOpen(true);
-      } else {
-        setSidebarOpen(false);
-      }
+      setSidebarOpen(window.innerWidth >= 1024);
     };
-
-    // Set initial state
     handleResize();
-
-    // Listen for resize events
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Handle orientation change
   useEffect(() => {
     const handleOrientationChange = () => {
-      // Small delay to allow for viewport adjustment
       setTimeout(() => {
-        if (window.innerWidth < 1024) {
-          setSidebarOpen(false);
-        }
+        if (window.innerWidth < 1024) setSidebarOpen(false);
       }, 100);
     };
-
-    window.addEventListener('orientationchange', handleOrientationChange);
-    return () => window.removeEventListener('orientationchange', handleOrientationChange);
+    window.addEventListener("orientationchange", handleOrientationChange);
+    return () =>
+      window.removeEventListener("orientationchange", handleOrientationChange);
   }, []);
 
-  // Close sidebar when clicking outside on mobile
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (window.innerWidth < 1024 && sidebarOpen) {
-        const sidebar = document.getElementById('sidebar');
+        const sidebar = document.getElementById("sidebar");
         const target = event.target as Node;
-        if (sidebar && !sidebar.contains(target)) {
-          setSidebarOpen(false);
-        }
+        if (sidebar && !sidebar.contains(target)) setSidebarOpen(false);
       }
     };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [sidebarOpen]);
 
   // Redirect if not authenticated
@@ -104,37 +87,27 @@ export default function Home() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        window.location.href = "/api/auth/login";
       }, 500);
-      return;
     }
   }, [user, authLoading, toast]);
 
-  // Fetch user chats
+  // Fetch chats
   const { data: chats = [], isLoading: chatsLoading } = useQuery<Chat[]>({
     queryKey: ["/api/chats"],
     enabled: !!user,
   });
 
-  // Fetch current chat messages
+  // Fetch messages for current chat
   const { data: currentChatData, isLoading: messagesLoading } = useQuery({
     queryKey: ["/api/chats", currentChatId],
     enabled: !!currentChatId,
   }) as { data: ChatWithMessages | undefined; isLoading: boolean };
 
-  // Create new chat mutation
+  // Create new chat
   const createChatMutation = useMutation({
-    mutationFn: async ({
-      title,
-      userId,
-    }: {
-      title: string;
-      userId: string;
-    }) => {
-      const response = await apiRequest("POST", "/api/chats", {
-        userId,
-        title,
-      });
+    mutationFn: async ({ title }: { title: string }) => {
+      const response = await apiRequest("POST", "/api/chats", { title });
       return response.json();
     },
     onSuccess: (newChat: Chat) => {
@@ -149,69 +122,59 @@ export default function Home() {
           variant: "destructive",
         });
         setTimeout(() => {
-          window.location.href = "/api/login";
+          window.location.href = "/api/auth/login";
         }, 500);
         return;
       }
       toast({
         title: "Error",
-        description: "Failed to create new chat",
+        description: "Failed to create chat",
         variant: "destructive",
       });
     },
   });
 
-  // Inside sendMessageMutation
-  const sendMessageMutation = useMutation({
-    mutationFn: async ({
-      chatId,
-      content,
-    }: {
-      chatId: string;
-      content: string;
-    }) => {
-      const response = await apiRequest(
-        "POST",
-        `/api/chats/${chatId}/messages`,
-        {
-          content,
-          role: "user",
-        },
+  // Send message with streaming
+  const sendMessageStream = async (chatId: string, content: string) => {
+    setIsTyping(true);
+    setStreamingText("");
+
+    return new Promise<void>((resolve, reject) => {
+      const eventSource = new EventSource(
+        `/api/chats/${chatId}/messages/stream?q=${encodeURIComponent(content)}`
       );
-      const data = await response.json();
-      console.log("Send message response:", data);
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/chats", currentChatId],
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/chats"] });
-      setMessage("");
-      setIsTyping(false);
-    },
-    onError: (error) => {
-      setIsTyping(false);
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/api/login";
-        }, 500);
-        return;
-      }
-      toast({
-        title: "Error",
-        description: "Failed to send message",
-        variant: "destructive",
-      });
-    },
-  });
 
-  // Delete chat mutation
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.done) {
+          eventSource.close();
+          queryClient.invalidateQueries({ queryKey: ["/api/chats", chatId] });
+          queryClient.invalidateQueries({ queryKey: ["/api/chats"] });
+          setIsTyping(false);
+          setStreamingText("");
+          resolve();
+        } else if (data.error) {
+          eventSource.close();
+          setIsTyping(false);
+          setStreamingText("");
+          reject(new Error(data.error));
+        } else if (data.text) {
+          setStreamingText((prev) => prev + data.text);
+        }
+      };
+
+      eventSource.onerror = (err) => {
+        console.error("EventSource error:", err);
+        eventSource.close();
+        setIsTyping(false);
+        setStreamingText("");
+        reject(err);
+      };
+    });
+  };
+
+  // Delete chat
   const deleteChatMutation = useMutation({
     mutationFn: async (chatId: string) => {
       await apiRequest("DELETE", `/api/chats/${chatId}`);
@@ -219,14 +182,8 @@ export default function Home() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/chats"] });
       if (currentChatId && chats.length > 1) {
-        const remainingChats = chats.filter(
-          (chat) => chat.id !== currentChatId,
-        );
-        if (remainingChats.length > 0) {
-          setCurrentChatId(remainingChats[0].id);
-        } else {
-          setCurrentChatId(null);
-        }
+        const remaining = chats.filter((c) => c.id !== currentChatId);
+        setCurrentChatId(remaining.length > 0 ? remaining[0].id : null);
       } else {
         setCurrentChatId(null);
       }
@@ -239,7 +196,7 @@ export default function Home() {
           variant: "destructive",
         });
         setTimeout(() => {
-          window.location.href = "/api/login";
+          window.location.href = "/api/auth/login";
         }, 500);
         return;
       }
@@ -251,63 +208,39 @@ export default function Home() {
     },
   });
 
-  // Auto-scroll to bottom of messages
+  // Scroll to bottom on new messages or streaming text
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [currentChatData?.messages]);
+  }, [currentChatData?.messages, streamingText]);
 
   const handleNewChat = () => {
-    createChatMutation.mutate({
-      title: "New Chat",
-      userId: "13794508", // or dynamic userId
-    });
-    // Close sidebar on mobile after creating chat
-    if (window.innerWidth < 1024) {
-      setSidebarOpen(false);
-    }
+    createChatMutation.mutate({ title: "New Chat" });
+    if (window.innerWidth < 1024) setSidebarOpen(false);
   };
 
   const handleSendMessage = async () => {
-    if (!message.trim() || sendMessageMutation.isPending) return;
+    if (!message.trim() || isTyping) return;
+    const messageContent = message.trim();
+    setMessage("");
 
-    // If no current chat, create one first
-    if (!currentChatId) {
-      setIsTyping(true);
-      const messageContent = message.trim();
-      setMessage(""); // Clear the input immediately
-
-      try {
+    try {
+      if (!currentChatId) {
         const newChat = await new Promise<Chat>((resolve, reject) => {
           createChatMutation.mutate(
-            {
-              title: "New Chat",
-              userId: "13794508", // or dynamic userId
-            },
-            {
-              onSuccess: resolve,
-              onError: reject,
-            },
+            { title: "New Chat" },
+            { onSuccess: resolve, onError: reject }
           );
         });
-
-        // Now send the message to the new chat
-        sendMessageMutation.mutate({
-          chatId: newChat.id,
-          content: messageContent,
-        });
-      } catch (error) {
-        setIsTyping(false);
-        toast({
-          title: "Error",
-          description: "Failed to create chat",
-          variant: "destructive",
-        });
+        setCurrentChatId(newChat.id);
+        await sendMessageStream(newChat.id, messageContent);
+      } else {
+        await sendMessageStream(currentChatId, messageContent);
       }
-    } else {
-      setIsTyping(true);
-      sendMessageMutation.mutate({
-        chatId: currentChatId,
-        content: message.trim(),
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "Failed to send message",
+        variant: "destructive",
       });
     }
   };
@@ -349,40 +282,14 @@ export default function Home() {
     },
   ];
 
-  const handleSuggestedQuestion = (question: string) => {
-    if (!currentChatId) {
-      // If no chat, create one and send question
-      setIsTyping(true);
-      createChatMutation.mutate(
-        {
-          title: "New Chat",
-          userId: "13794508",
-        },
-        {
-          onSuccess: (newChat: Chat) => {
-            setCurrentChatId(newChat.id);
-            sendMessageMutation.mutate({
-              chatId: newChat.id,
-              content: question,
-            });
-          },
-        },
-      );
-    } else {
-      setIsTyping(true);
-      sendMessageMutation.mutate({
-        chatId: currentChatId,
-        content: question,
-      });
-    }
+  const handleSuggestedQuestion = async (question: string) => {
+    setMessage(question);
+    await handleSendMessage();
   };
 
   const handleChatSelect = (chatId: string) => {
     setCurrentChatId(chatId);
-    // Close sidebar on mobile after selecting chat
-    if (window.innerWidth < 1024) {
-      setSidebarOpen(false);
-    }
+    if (window.innerWidth < 1024) setSidebarOpen(false);
   };
 
   if (authLoading) {
@@ -479,7 +386,7 @@ export default function Home() {
                       className={cn(
                         "p-2.5 sm:p-3 lg:p-3 xl:p-4 rounded-lg cursor-pointer transition-all duration-200 group",
                         "hover:bg-muted active:bg-muted/80",
-                        "touch-manipulation", // Improve touch responsiveness
+                        "touch-manipulation",
                         currentChatId === chat.id && "bg-muted ring-1 ring-primary/20",
                       )}
                       onClick={() => handleChatSelect(chat.id)}
@@ -544,15 +451,7 @@ export default function Home() {
                 variant="ghost"
                 size="sm"
                 className="p-1 sm:p-1.5 touch-manipulation"
-                data-testid="button-settings"
-              >
-                <Settings className="w-3 h-3 sm:w-4 sm:h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="p-1 sm:p-1.5 touch-manipulation"
-                onClick={() => (window.location.href = "/api/logout")}
+                onClick={() => (window.location.href = "/")}
                 data-testid="button-logout"
               >
                 <LogOut className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -614,6 +513,7 @@ export default function Home() {
                         variant="outline"
                         className="p-3 sm:p-4 lg:p-5 h-auto text-left border-border hover:bg-muted transition-all duration-200 touch-manipulation"
                         onClick={() => handleSuggestedQuestion(item.question)}
+                        disabled={isTyping}
                         data-testid={`button-suggested-${index}`}
                       >
                         <div className="flex items-center space-x-2 sm:space-x-3 w-full">
@@ -679,8 +579,22 @@ export default function Home() {
                     ))
                   )}
 
-                  {/* Typing Indicator */}
-                  {isTyping && (
+                  {/* Streaming Response */}
+                  {streamingText && (
+                    <div className="flex space-x-2 sm:space-x-3 lg:space-x-4">
+                      <div className="w-6 h-6 sm:w-8 sm:h-8 lg:w-10 lg:h-10 bg-accent rounded-full flex items-center justify-center flex-shrink-0">
+                        <Bot className="w-3 h-3 sm:w-4 sm:h-4 lg:w-5 lg:h-5 text-accent-foreground" />
+                      </div>
+                      <div className="bg-secondary rounded-2xl rounded-bl-md px-3 py-2 sm:px-4 sm:py-3 lg:px-5 lg:py-4 max-w-[85%] sm:max-w-[75%] lg:max-w-2xl xl:max-w-3xl">
+                        <p className="whitespace-pre-wrap break-words text-sm sm:text-base lg:text-base">
+                          {streamingText}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Typing Indicator (only show when typing but no streaming text yet) */}
+                  {isTyping && !streamingText && (
                     <div className="flex space-x-2 sm:space-x-3 lg:space-x-4">
                       <div className="w-6 h-6 sm:w-8 sm:h-8 lg:w-10 lg:h-10 bg-accent rounded-full flex items-center justify-center flex-shrink-0">
                         <Bot className="w-3 h-3 sm:w-4 sm:h-4 lg:w-5 lg:h-5 text-accent-foreground" />
@@ -706,6 +620,7 @@ export default function Home() {
         </div>
 
         {/* Chat Input */}
+        {/* Chat Input */}
         <div className="border-t border-border p-3 sm:p-4 lg:p-4 xl:p-5 2xl:p-6 flex-shrink-0">
           <div className="max-w-none sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto">
             <div className="relative">
@@ -716,6 +631,7 @@ export default function Home() {
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={handleKeyPress}
                     placeholder="Ask about European universities..."
+                    disabled={isTyping}
                     className={cn(
                       "bg-input border-border resize-none touch-manipulation",
                       "pr-12 sm:pr-14 lg:pr-16",
@@ -729,7 +645,7 @@ export default function Home() {
                   />
                   <Button
                     onClick={handleSendMessage}
-                    disabled={!message.trim() || sendMessageMutation.isPending}
+                    disabled={!message.trim() || isTyping}
                     size="sm"
                     className={cn(
                       "absolute right-2 bottom-2 bg-primary hover:bg-primary/90 disabled:opacity-50",
@@ -739,7 +655,7 @@ export default function Home() {
                     )}
                     data-testid="button-send"
                   >
-                    {sendMessageMutation.isPending ? (
+                    {isTyping ? (
                       <div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
                     ) : (
                       <Send className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -761,3 +677,4 @@ export default function Home() {
     </div>
   );
 }
+                  

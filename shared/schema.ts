@@ -12,7 +12,6 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Session storage table.
-// (IMPORTANT) This table is mandatory for session store, don't drop it.
 export const sessions = pgTable(
   "sessions",
   {
@@ -24,13 +23,11 @@ export const sessions = pgTable(
 );
 
 // User storage table.
-// Added password_hash to support email/password auth in addition to previous OAuth fields.
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: varchar("email").unique(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
-  // New: store bcrypt hashed password (nullable so OAuth users continue to work)
   passwordHash: varchar("password_hash"),
   profileImageUrl: varchar("profile_image_url"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -66,10 +63,11 @@ export const insertChatSchema = createInsertSchema(chats).omit({
   updatedAt: true,
 });
 
+// role is now optional (server will force "user")
 export const insertMessageSchema = createInsertSchema(messages).omit({
   id: true,
   createdAt: true,
-});
+}).partial({ role: true });
 
 // Types
 export type UpsertUser = typeof users.$inferInsert;
